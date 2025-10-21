@@ -1,166 +1,37 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import './App.css';
-
-// @ts-ignore - soundtouchjs doesn't have type definitions
-import { PitchShifter } from 'soundtouchjs';
-
-// Correct typing for webkitAudioContext
-const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+import { useAudioPlayer } from './hooks/useAudioPlayer';
 
 function App() {
-  const audioContext = useRef<AudioContext | null>(null);
-  const audioBuffer = useRef<AudioBuffer | null>(null);
-  const pitchShifterRef = useRef<any>(null);
-  const [speed, setSpeed] = useState(1);
-  const [pitch, setPitch] = useState(0); // pitch in semitones (-12 to +12)
-  const [audioFile, setAudioFile] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Update speed (tempo)
-  useEffect(() => {
-    if (pitchShifterRef.current) {
-      pitchShifterRef.current.tempo = speed;
-    }
-  }, [speed]);
-
-  // Update pitch
-  useEffect(() => {
-    if (pitchShifterRef.current) {
-      pitchShifterRef.current.pitchSemitones = pitch;
-    }
-  }, [pitch]);
+  const audioPlayer = useAudioPlayer({
+    onPlaybackEnd: () => {
+      console.log('Playback ended');
+    },
+    onError: (error) => {
+      alert(`Error: ${error.message}`);
+    },
+  });
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files && files.length > 0) {
-      setIsLoading(true);
-      const file = files[0];
-      
-      try {
-        // Stop any existing playback
-        if (isPlaying) {
-          handleStop();
-        }
-        
-        // Clean up previous resources
-        if (audioContext.current) {
-          await audioContext.current.close();
-        }
-        
-        // Create new audio context
-        audioContext.current = new AudioContextClass();
-        
-        // Read file as array buffer
-        const arrayBuffer = await file.arrayBuffer();
-        
-        // Decode audio data
-        audioBuffer.current = await audioContext.current.decodeAudioData(arrayBuffer);
-        
-        // Create pitch shifter with the audio buffer
-        pitchShifterRef.current = new PitchShifter(
-          audioContext.current,
-          audioBuffer.current,
-          1024
-        );
-        
-        // Set initial values
-        pitchShifterRef.current.tempo = speed;
-        pitchShifterRef.current.pitchSemitones = pitch;
-        
-        // Connect to destination
-        pitchShifterRef.current.connect(audioContext.current.destination);
-        
-        // Set duration
-        setDuration(audioBuffer.current.duration);
-        setCurrentTime(0);
-        setAudioFile(file.name);
-        
-        // Listen for when playback position updates
-        pitchShifterRef.current.on('play', (event: any) => {
-          setCurrentTime(event.timePlayed);
-          if (event.percentagePlayed >= 99.9) {
-            handleStop();
-          }
-        });
-        
-      } catch (error) {
-        console.error('Error loading audio file:', error);
-        alert('Error loading audio file. Please try another file.');
-      } finally {
-        setIsLoading(false);
-      }
+      await audioPlayer.loadFile(files[0]);
     }
-  };
-
-  const handleSpeedChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newSpeed = parseFloat(event.target.value);
-    setSpeed(newSpeed);
-  };
-
-  const handlePitchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newPitch = parseFloat(event.target.value);
-    setPitch(newPitch);
-  };
-
-  const handlePlay = () => {
-    if (pitchShifterRef.current && audioContext.current) {
-      if (audioContext.current.state === 'suspended') {
-        audioContext.current.resume();
-      }
-      // Ensure connected before playing
-      pitchShifterRef.current.connect(audioContext.current.destination);
-      setIsPlaying(true);
-    }
-  };
-
-  const handlePause = () => {
-    if (pitchShifterRef.current && audioContext.current) {
-      pitchShifterRef.current.disconnect();
-      audioContext.current.suspend();
-      setIsPlaying(false);
-    }
-  };
-
-  const handleStop = () => {
-    if (pitchShifterRef.current) {
-      pitchShifterRef.current.disconnect();
-      pitchShifterRef.current.percentagePlayed = 0;
-    }
-    if (audioContext.current) {
-      audioContext.current.suspend();
-    }
-    setIsPlaying(false);
-    setCurrentTime(0);
   };
 
   const handleSeek = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newTime = parseFloat(event.target.value);
-    setCurrentTime(newTime);
+    audioPlayer.seek(newTime);
   };
 
-  const handleSeekEnd = (event: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
-    const target = event.target as HTMLInputElement;
-    const newTime = parseFloat(target.value);
-    setCurrentTime(newTime);
-    
-    if (pitchShifterRef.current && duration > 0) {
-      const percentage = newTime / duration;
-      try {
-        // Set the playback position (percentagePlayed expects 0-1, not 0-100)
-        pitchShifterRef.current.percentagePlayed = percentage;
-      } catch (error) {
-        console.error('Error seeking:', error);
-      }
-    }
+  const handleSpeedChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newSpeed = parseFloat(event.target.value);
+    audioPlayer.setSpeed(newSpeed);
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  const handlePitchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newPitch = parseFloat(event.target.value);
+    audioPlayer.setPitch(newPitch);
   };
 
   return (
@@ -175,30 +46,28 @@ function App() {
           type="file" 
           accept="audio/*" 
           onChange={handleFileChange}
-          disabled={isLoading}
+          disabled={audioPlayer.isLoading}
         />
-        {isLoading && <span style={{ marginLeft: '10px' }}>Loading...</span>}
+        {audioPlayer.isLoading && <span style={{ marginLeft: '10px' }}>Loading...</span>}
       </div>
 
-      {audioFile && (
+      {audioPlayer.audioFileName && (
         <>
           <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-            <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>{audioFile}</div>
+            <div style={{ marginBottom: '10px', fontWeight: 'bold' }}>{audioPlayer.audioFileName}</div>
             
             <div style={{ marginBottom: '10px' }}>
-              <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+              <span>{audioPlayer.formatTime(audioPlayer.currentTime)} / {audioPlayer.formatTime(audioPlayer.duration)}</span>
             </div>
 
             <div style={{ marginBottom: '15px' }}>
               <input 
                 type="range" 
                 min="0" 
-                max={duration || 0} 
+                max={audioPlayer.duration || 0} 
                 step="0.1" 
-                value={currentTime} 
+                value={audioPlayer.currentTime} 
                 onChange={handleSeek}
-                onMouseUp={handleSeekEnd}
-                onTouchEnd={handleSeekEnd}
                 style={{ 
                   width: '100%', 
                   height: '8px',
@@ -210,12 +79,12 @@ function App() {
 
             <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
               <button 
-                onClick={handlePlay} 
-                disabled={isPlaying}
+                onClick={audioPlayer.play} 
+                disabled={audioPlayer.isPlaying}
                 style={{ 
                   padding: '10px 20px', 
-                  cursor: isPlaying ? 'not-allowed' : 'pointer',
-                  backgroundColor: isPlaying ? '#ccc' : '#4CAF50',
+                  cursor: audioPlayer.isPlaying ? 'not-allowed' : 'pointer',
+                  backgroundColor: audioPlayer.isPlaying ? '#ccc' : '#4CAF50',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
@@ -225,12 +94,12 @@ function App() {
                 ▶ Play
               </button>
               <button 
-                onClick={handlePause} 
-                disabled={!isPlaying}
+                onClick={audioPlayer.pause} 
+                disabled={!audioPlayer.isPlaying}
                 style={{ 
                   padding: '10px 20px', 
-                  cursor: !isPlaying ? 'not-allowed' : 'pointer',
-                  backgroundColor: !isPlaying ? '#ccc' : '#FF9800',
+                  cursor: !audioPlayer.isPlaying ? 'not-allowed' : 'pointer',
+                  backgroundColor: !audioPlayer.isPlaying ? '#ccc' : '#FF9800',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
@@ -240,7 +109,7 @@ function App() {
                 ⏸ Pause
               </button>
               <button 
-                onClick={handleStop}
+                onClick={audioPlayer.stop}
                 style={{ 
                   padding: '10px 20px', 
                   cursor: 'pointer',
@@ -258,13 +127,13 @@ function App() {
 
           <div style={{ marginBottom: '20px' }}>
             <label style={{ display: 'block', marginBottom: '10px' }}>
-              <strong>Speed: {speed.toFixed(2)}x</strong>
+              <strong>Speed: {audioPlayer.speed.toFixed(2)}x</strong>
               <input 
                 type="range" 
                 min="0.5" 
                 max="2" 
                 step="0.1" 
-                value={speed} 
+                value={audioPlayer.speed} 
                 onChange={handleSpeedChange}
                 style={{ width: '100%', marginTop: '5px' }}
               />
@@ -273,13 +142,13 @@ function App() {
 
           <div style={{ marginBottom: '20px' }}>
             <label style={{ display: 'block', marginBottom: '10px' }}>
-              <strong>Pitch: {pitch > 0 ? '+' : ''}{pitch.toFixed(1)} semitones</strong>
+              <strong>Pitch: {audioPlayer.pitch > 0 ? '+' : ''}{audioPlayer.pitch.toFixed(1)} semitones</strong>
               <input 
                 type="range" 
                 min="-12" 
                 max="12" 
                 step="0.5" 
-                value={pitch} 
+                value={audioPlayer.pitch} 
                 onChange={handlePitchChange}
                 style={{ width: '100%', marginTop: '5px' }}
               />
